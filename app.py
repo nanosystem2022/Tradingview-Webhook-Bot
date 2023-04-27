@@ -12,7 +12,6 @@ app = Flask(__name__)
 with open('config.json') as config_file:
     config = json.load(config_file)
 
-
 ###############################################################################
 #
 #             This Section is for Exchange Validation
@@ -56,13 +55,12 @@ if 'BINANCE-FUTURES' in config['EXCHANGES']:
 def index():
     return {'message': 'Server is running!'}
 
-
-
+open_position = False
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    global open_position
     print("Hook Received!")
-    #data = request.form.to_dict()  ##This is for private testing locally
     data = json.loads(request.data)
     print(data)
 
@@ -73,78 +71,31 @@ def webhook():
             "message": "Invalid Key, Please Try Again!"
         }
 
-    ##############################################################################
-    #             Bybit ## MOVE THIS CODE TO NEW FILE
-    ##############################################################################
     if data['exchange'] == 'bybit':
 
         if use_bybit:
-            if data['close_position'] == 'True':
+            if 'close_position' in data and data['close_position'] in ['closeshort', 'closelong']:
                 print("Closing Position")
                 session.close_position(symbol=data['symbol'])
+                open_position = False
             else:
-                if 'cancel_orders' in data:
-                    print("Cancelling Order")
-                    session.cancel_all_active_orders(symbol=data['symbol'])
-                if 'type' in data:
-                    print("Placing Order")
-                    if 'price' in data:
-                        price = data['price']
-                    else:
-                        price = 0
+                if not open_position:
+                    if 'cancel_orders' in data:
+                        print("Cancelling Order")
+                        session.cancel_all_active_orders(symbol=data['symbol'])
+                    if 'type' in data:
+                        print("Placing Order")
+                        if 'price' in data:
+                            price = data['price']
+                        else:
+                            price = 0
 
-
-                    if data['order_mode'] == 'Both':
-                        take_profit_percent = float(data['take_profit_percent'])/100
-                        stop_loss_percent = float(data['stop_loss_percent'])/100
-                        current_price = session.latest_information_for_symbol(symbol=data['symbol'])['result'][0]['last_price']
-                        if data['side'] == 'Buy':
-                            take_profit_price = round(float(current_price) + (float(current_price) * take_profit_percent), 2)
-                            stop_loss_price = round(float(current_price) - (float(current_price) * stop_loss_percent), 2)
-                        elif data['side'] == 'Sell':
-                            take_profit_price = round(float(current_price) - (float(current_price) * take_profit_percent), 2)
-                            stop_loss_price = round(float(current_price) + (float(current_price) * stop_loss_percent), 2)
-
-
-                        print("Take Profit Price: " + str(take_profit_price))
-                        print("Stop Loss Price: " + str(stop_loss_price))
-
-                        session.place_active_order(symbol=data['symbol'], order_type=data['type'], side=data['side'],
-                                                   qty=data['qty'], time_in_force="GoodTillCancel", reduce_only=False,
-                                                   close_on_trigger=False, price=price, take_profit=take_profit_price, stop_loss=stop_loss_price)
-
-                    elif data['order_mode'] == 'Profit':
-                        take_profit_percent = float(data['take_profit_percent'])/100
-                        current_price = session.latest_information_for_symbol(symbol=data['symbol'])['result'][0]['last_price']
-                        if data['side'] == 'Buy':
-                            take_profit_price = round(float(current_price) + (float(current_price) * take_profit_percent), 2)
-                        elif data['side'] == 'Sell':
-                            take_profit_price = round(float(current_price) - (float(current_price) * take_profit_percent), 2)
-
-                        print("Take Profit Price: " + str(take_profit_price))
-                        session.place_active_order(symbol=data['symbol'], order_type=data['type'], side=data['side'],
-                                                   qty=data['qty'], time_in_force="GoodTillCancel", reduce_only=False,
-                                                   close_on_trigger=False, price=price, take_profit=take_profit_price)
-                    elif data['order_mode'] == 'Stop':
-                        stop_loss_percent = float(data['stop_loss_percent'])/100
-                        current_price = session.latest_information_for_symbol(symbol=data['symbol'])['result'][0]['last_price']
-                        if data['side'] == 'Buy':
-                            stop_loss_price = round(float(current_price) - (float(current_price) * stop_loss_percent), 2)
-                        elif data['side'] == 'Sell':
-                            stop_loss_price = round(float(current_price) + (float(current_price) * stop_loss_percent), 2)
-
-                        print("Stop Loss Price: " + str(stop_loss_price))
-                        session.place_active_order(symbol=data['symbol'], order_type=data['type'], side=data['side'],
-                                                   qty=data['qty'], time_in_force="GoodTillCancel", reduce_only=False,
-                                                   close_on_trigger=False, price=price, stop_loss=stop_loss_price)
-
-
-
-                    else:
                         session.place_active_order(symbol=data['symbol'], order_type=data['type'], side=data['side'],
                                                    qty=data['qty'], time_in_force="GoodTillCancel", reduce_only=False,
                                                    close_on_trigger=False, price=price)
-
+                        open_position = True
+                else:
+                    print("An open position already exists. Ignoring the new signal.")
 
         return {
             "status": "success",
@@ -162,9 +113,6 @@ def webhook():
                 "message": "Binance Futures Webhook Received!"
             }
 
-
-
-
     else:
         print("Invalid Exchange, Please Try Again!")
         return {
@@ -174,4 +122,3 @@ def webhook():
 
 if __name__ == '__main__':
     app.run(debug=False)
-
